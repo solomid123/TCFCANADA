@@ -41,33 +41,38 @@ async def main():
         worker_secret = secrets.token_urlsafe(40)
         checked(await client.post(f"https://api.supabase.com/v1/projects/{REF}/secrets", headers=MANAGEMENT, json=[
             {"name": "AZURE_API_KEY", "value": os.environ["AZURE_API_KEY"]},
+            {"name": "AZURE_TEXT_DEPLOYMENT", "value": os.getenv("AZURE_TEXT_DEPLOYMENT", "DeepSeek-V4-Flash")},
             {"name": "TCF_WORKER_SECRET", "value": worker_secret},
         ]))
         checked(await client.put(f"{URL}/storage/v1/bucket/tcf-listening-private", headers=DATA, json={"public": False, "file_size_limit": 30000000, "allowed_mime_types": ["audio/wav", "image/png", "image/jpeg", "application/json"]}))
 
-        folder = ROOT / "backend/data" / SEED
-        manifest = json.loads((folder / "content.json").read_text())
-        plan = [q for batch in sorted(folder.glob("batch-*.json")) for q in json.loads(batch.read_text())["questions"]]
-        assert len(plan) == 39
-        assets = {}
-        for question in manifest["questions"]:
-            for asset in [question["audio"]] + ([question["image"]] if question["image"] else []):
-                assets[asset["name"]] = {**asset, "path": f"{SEED}/{asset['name']}"}
-                if asset["name"].endswith(".wav"):
-                    assets[asset["name"]]["duration"] = question["duration"]
-        limit = asyncio.Semaphore(4)
+        existing_seed = checked(await client.get(f"{URL}/rest/v1/tcf_listening_sessions", headers=DATA, params={"id": "eq." + SEED, "select": "id,state"})).json()
+        if not existing_seed:
+            folder = ROOT / "backend/data" / SEED
+            manifest = json.loads((folder / "content.json").read_text())
+            plan = [q for batch in sorted(folder.glob("batch-*.json")) for q in json.loads(batch.read_text())["questions"]]
+            assert len(plan) == 39
+            assets = {}
+            for question in manifest["questions"]:
+                for asset in [question["audio"]] + ([question["image"]] if question["image"] else []):
+                    assets[asset["name"]] = {**asset, "path": f"{SEED}/{asset['name']}"}
+                    if asset["name"].endswith(".wav"):
+                        assets[asset["name"]]["duration"] = question["duration"]
+            limit = asyncio.Semaphore(4)
 
-        async def upload(asset):
-            async with limit:
-                name = asset["name"]
-                content_type = "audio/wav" if name.endswith(".wav") else "image/png"
-                checked(await client.post(f"{URL}/storage/v1/object/tcf-listening-private/{asset['path']}", headers={**DATA, "Content-Type": content_type, "x-upsert": "true"}, content=(folder / name).read_bytes()))
+            async def upload(asset):
+                async with limit:
+                    name = asset["name"]
+                    content_type = "audio/wav" if name.endswith(".wav") else "image/png"
+                    checked(await client.post(f"{URL}/storage/v1/object/tcf-listening-private/{asset['path']}", headers={**DATA, "Content-Type": content_type, "x-upsert": "true"}, content=(folder / name).read_bytes()))
 
-        await asyncio.gather(*(upload(asset) for asset in assets.values()))
-        row = {"id": SEED, "owner_id": None, "state": "ready", "phase": "Votre session est prête", "planned": 39, "images": 4, "audio": 39,
-               "plan": plan, "assets": assets, "image_checks": {str(i): True for i in range(1, 5)}, "error": None, "lease_token": None, "lease_until": None}
-        checked(await client.post(f"{URL}/rest/v1/tcf_listening_sessions?on_conflict=id", headers={**DATA, "Prefer": "resolution=merge-duplicates"}, json=row))
-        print("39 audio files and 4 images uploaded; starter session ready.", flush=True)
+            await asyncio.gather(*(upload(asset) for asset in assets.values()))
+            row = {"id": SEED, "owner_id": None, "state": "ready", "phase": "Votre session est prête", "planned": 39, "images": 4, "audio": 39,
+                   "plan": plan, "assets": assets, "image_checks": {str(i): True for i in range(1, 5)}, "error": None, "lease_token": None, "lease_until": None}
+            checked(await client.post(f"{URL}/rest/v1/tcf_listening_sessions", headers=DATA, json=row))
+            print("Starter session uploaded.", flush=True)
+        else:
+            print("Existing starter session retained, including corrected audio.", flush=True)
 
         subprocess.run(["supabase", "functions", "deploy", "listening-api", "--project-ref", REF, "--no-verify-jwt", "--use-api"], cwd=ROOT, env=os.environ.copy(), check=True)
         await sql(f"""

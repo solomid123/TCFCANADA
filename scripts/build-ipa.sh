@@ -19,8 +19,8 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   SUPPORTED_PLATFORMS=iphoneos \
   TARGETED_DEVICE_FAMILY=1,2 \
-  CURRENT_PROJECT_VERSION=5 \
-  archive
+  CURRENT_PROJECT_VERSION=6 \
+  clean archive
 
 python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$STAGING"
 mkdir -p "$STAGING/Payload" "$ROOT/dist"

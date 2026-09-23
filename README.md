@@ -1,10 +1,10 @@
 # TCF Canada
 
-SwiftUI preparation app with reading, listening, writing, and speaking exercises.
+SwiftUI preparation app focused on generated listening tests and saved results.
 
 ## AI listening
 
-**Écoute → Banque d'écoute → Nouveau test d'écoute** prepares a complete 39-question test. The backend uses Azure-hosted `grok-4.6`, FLUX.2-pro images, and Canadian French Azure Speech voices. The app downloads the media before practice, restores saved answers after relaunch, and provides all 39 transcripts and corrections at the end.
+**Nouveau test d'écoute** prepares a complete 39-question test. The backend uses Azure-hosted `DeepSeek-V4-Flash` for questions, Grok for image verification, FLUX.2-pro images, and Canadian French Azure Speech voices. The app downloads media in parallel before practice, restores saved answers after relaunch, and provides all 39 transcripts and corrections at the end.
 
 **Mes tests** keeps prepared tests, in-progress tests and completed scores accessible from the practice page. Completed answers and corrections are stored in the hosted backend as well as on the device. The bank counter reports distinct available listening questions from the user's saved tests and starter set; it is not a hard-coded inventory claim.
 
@@ -20,17 +20,17 @@ Run `bash scripts/build-ipa.sh` with Xcode selected. The script checks that the 
 
 ## App structure
 
-- **Pratique**: skill selector, level-based series filtering, complete question banks, and reference tools. Reading/listening answers remain available when moving between questions, with a result sheet at the end. Writing drafts are retained when switching tasks within the current session.
-- **Examen**: four timed sections with pauses between sections. Reading/listening corrections and writing/speaking study aids are hidden during the session. The final summary shows reading/listening results; writing and speaking are self-assessed.
-- **Scores**: TCF-to-NCLC conversion and the existing CRS calculator.
+- **Banque d'écoute**: the generated 39-question listening flow opens directly from the home page.
+- **Mes tests**: prepared tests, saved progress, scores and complete corrections.
+- The former bundled reading/listening/writing/speaking samples, reference tools, mock exam and scores tab have been removed. Downloaded generated tests remain cached for reuse.
 
-The mock exam uses the bundled training bank (currently 6 reading and 10 listening questions), with 20/15/60/12-minute section limits. It is a shortened practice format, not a full official 39-question reading/listening exam. On-screen question counts come from the actual data.
+Spoken-choice recordings announce “Proposition A”, pause 700 ms before the choice, and leave 1.5 seconds before the next proposition. Recordings include a short lead-in. Saved test manifests are refreshed on opening so corrected audio replaces older cached versions while preserving answers.
 
 ## Design
 
 `apptsst/TCFGlassTheme.swift` defines the shared palette, layered background, cards, buttons, and level labels. It uses native Liquid Glass on iOS 26+, a material fallback on iOS 17–25, and opaque surfaces when Reduce Transparency is enabled.
 
-`ContentView.swift` owns the floating navigation bar and hides it during active practice/exam sessions. Practice routing lives in `PreparationView.swift`; exam timing and section progression live in `FullExamSessionView.swift`.
+`ContentView.swift` hosts the generated-only bank. `PreparationView.swift` routes new and saved tests; `AIListeningSessionView.swift` presents the listening session and its review.
 
 ## Build and test
 
@@ -44,4 +44,4 @@ xcodebuild -project apptsst.xcodeproj -scheme apptsst \
   test
 ```
 
-The UI checks cover answer retention/results, level filtering/focused navigation, writing-task routing/draft retention, and progression through all four exam sections.
+The UI checks cover answer retention/results, corrected-audio cache refresh, saved-test reopening, automatic hosted connection, and the generated-only navigation. Fixture-server UI tests run in Debug; hosted checks can also run in Release.

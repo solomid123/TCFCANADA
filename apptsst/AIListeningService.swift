@@ -3,7 +3,7 @@ import Combine
 import CryptoKit
 import Security
 
-struct AIListeningAsset: Codable {
+struct AIListeningAsset: Codable, Sendable {
     let name: String
     let sha256: String
     let bytes: Int
@@ -185,6 +185,13 @@ final class AIListeningStore: ObservableObject {
                let cached = try? decoder.decode(AIListeningManifest.self, from: data), isValid(cached) {
                 manifest = cached
                 if allAssetsValid(cached) {
+                    // Refresh the manifest so corrected recordings replace older cached versions.
+                    if let latestData = try? await dataRequest("/content"),
+                       let latest = try? decoder.decode(AIListeningManifest.self, from: latestData), isValid(latest) {
+                        manifest = latest
+                        try latestData.write(to: directory.appendingPathComponent("manifest.json"), options: .atomic)
+                        try await downloadAssets(latest)
+                    }
                     await restoreCompletedTest()
                     restoreStage()
                     return
@@ -208,19 +215,7 @@ final class AIListeningStore: ObservableObject {
             guard isValid(content) else { throw AIListeningError.message("La session reçue est incomplète ou invalide.") }
             manifest = content
             try data.write(to: directory.appendingPathComponent("manifest.json"), options: .atomic)
-            let assets = content.questions.flatMap { [$0.audio] + ($0.image.map { [$0] } ?? []) }
-            downloadTotal = assets.count
-            for asset in assets {
-                try Task.checkCancellation()
-                if !assetValid(asset) {
-                    let data = try await dataRequest("/assets/\(asset.name)")
-                    guard data.count == asset.bytes, digest(data) == asset.sha256 else {
-                        throw AIListeningError.message("Un téléchargement est incomplet. Réessayez pour le reprendre.")
-                    }
-                    try data.write(to: directory.appendingPathComponent(asset.name), options: .atomic)
-                }
-                downloads += 1
-            }
+            try await downloadAssets(content)
             await restoreCompletedTest()
             restoreStage()
         } catch is CancellationError {
@@ -237,7 +232,7 @@ final class AIListeningStore: ObservableObject {
     }
 
     private func restoreCompletedTest() async {
-        guard attempt.result == nil, AIListeningConnection.isHosted(baseURL) else { return }
+        guard AIListeningConnection.isHosted(baseURL) else { return }
         struct SavedAttempt: Decodable {
             let answers: [String: Int]
             let result: AIListeningResult?
@@ -266,6 +261,31 @@ final class AIListeningStore: ObservableObject {
     }
 
     private func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+    private func downloadAssets(_ content: AIListeningManifest) async throws {
+        let assets = content.questions.flatMap { [$0.audio] + ($0.image.map { [$0] } ?? []) }
+        downloadTotal = assets.count
+        downloads = 0
+        for offset in stride(from: 0, to: assets.count, by: 4) {
+            try Task.checkCancellation()
+            let batch = Array(assets[offset..<min(offset + 4, assets.count)])
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for asset in batch {
+                    group.addTask { try await self.downloadAsset(asset) }
+                }
+                for try await _ in group { downloads += 1 }
+            }
+        }
+    }
+
+    private func downloadAsset(_ asset: AIListeningAsset) async throws {
+        guard !assetValid(asset), let url = localURL(asset) else { return }
+        let data = try await dataRequest("/assets/\(asset.name)")
+        try Task.checkCancellation()
+        guard data.count == asset.bytes, digest(data) == asset.sha256 else {
+            throw AIListeningError.message("Un téléchargement est incomplet. Réessayez pour le reprendre.")
+        }
+        try data.write(to: url, options: .atomic)
+    }
     private func assetValid(_ asset: AIListeningAsset) -> Bool {
         guard let url = localURL(asset), let data = try? Data(contentsOf: url) else { return false }
         return data.count == asset.bytes && digest(data) == asset.sha256

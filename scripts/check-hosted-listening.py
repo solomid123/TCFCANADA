@@ -58,15 +58,16 @@ async def main():
         print(json.dumps({"automatic_auth": "passed", "refresh": "passed", "questions": 39, "assets": 43, "checksums": "passed", "grading": "passed", "private_seed": "protected"}), flush=True)
 
         if os.getenv("CHECK_CLOUD_WORKER") == "1":
-            # Exercise one new question and audio recording, keeping the other 38 paid assets.
+            # Exercise a six-question batch and parallel audio, reusing the other 33 paid assets.
             admin_headers = {"apikey": os.environ["SUPABASE_SECRET_KEY"]}
             response = await client.get(project + "/rest/v1/tcf_listening_sessions", headers=admin_headers, params={"id": "eq." + session_id, "select": "*"})
             response.raise_for_status()
             row = response.json()[0]
-            assets = {k: v for k, v in row["assets"].items() if k != "audio-39.wav"}
+            assets = {k: v for k, v in row["assets"].items() if k not in {f"audio-{i}.wav" for i in range(34, 40)}}
             update = await client.patch(project + "/rest/v1/tcf_listening_sessions?id=eq." + session_id, headers=admin_headers,
-                                        json={"plan": row["plan"][:38], "planned": 38, "audio": 38, "state": "queued", "assets": assets, "error": None})
+                                        json={"plan": row["plan"][:33], "planned": 33, "audio": 33, "state": "queued", "assets": assets, "error": None, "last_answers": None, "last_score": None, "completed_at": None})
             update.raise_for_status()
+            started = time.monotonic()
             (await client.post(path, headers=headers)).raise_for_status()
             deadline = time.monotonic() + 360
             while True:
@@ -80,7 +81,12 @@ async def main():
                 if time.monotonic() > deadline:
                     raise RuntimeError("Hosted worker did not finish within six minutes")
                 await asyncio.sleep(3)
-            print("Hosted worker generated and persisted a new question and Canadian French audio successfully.", flush=True)
+            final = await client.get(project + "/rest/v1/tcf_listening_sessions", headers=admin_headers, params={"id": "eq." + session_id, "select": "plan,assets"})
+            final.raise_for_status()
+            finished = final.json()[0]
+            assert len(finished["plan"]) == 39
+            assert all(finished["assets"][f"audio-{i}.wav"]["audio_version"] == 2 for i in range(34, 40))
+            print(json.dumps({"hosted_new_questions": 6, "hosted_new_recordings": 6, "seconds": round(time.monotonic() - started, 1), "audio_version": 2}), flush=True)
 
 
 if __name__ == "__main__":

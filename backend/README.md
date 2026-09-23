@@ -1,6 +1,6 @@
 # AI listening backend
 
-Python 3.11+ service for the app's **Écoute → Session IA · 39 questions** flow.
+Optional Python 3.11+ development service for generated 39-question listening tests. The release app uses the hosted Supabase implementation described in `supabase/README.md`.
 
 ## Run locally
 
@@ -13,11 +13,11 @@ cp .env.example .env
 
 Fill in `.env`:
 
-- `AZURE_API_KEY`: the Azure resource key. The configured `grok-4.6` endpoint accepts API-key authentication; `azure.identity` is not needed for this setup.
+- `AZURE_API_KEY`: the Azure resource key. The configured Azure endpoint accepts API-key authentication; `azure.identity` is not needed for this setup.
 - `TCF_API_TOKEN`: a separate random access token for this backend. Generate one with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`.
 - `AZURE_SPEECH_KEY`: only needed if Speech has a different key.
 
-The example includes the supplied Grok, FLUX and Speech endpoint URLs. Credentials are read from environment variables or the ignored `.env` file; Azure credentials are never sent to the app.
+The example includes the Azure text, FLUX and Speech endpoints. Questions use `DeepSeek-V4-Flash` and image verification uses `grok-4.6`. Credentials are read from environment variables or the ignored `.env` file; Azure credentials are never sent to the app.
 
 Start one worker:
 
@@ -25,17 +25,18 @@ Start one worker:
 .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8765
 ```
 
-In the iPhone simulator, open **Écoute → Session IA → Connexion**, use `http://127.0.0.1:8765`, and enter `TCF_API_TOKEN`. The backend token is saved in Keychain. For a physical iPhone, host this service behind HTTPS and enter that reachable URL. Keep `data/` on a persistent volume. The in-process generation queue is designed for a single backend worker.
+In a Debug build, the developer connection button can select `http://127.0.0.1:8765` and `TCF_API_TOKEN`. Release builds connect automatically to Supabase. Keep the local `data/` directory on a persistent volume. This optional in-process generation queue is designed for a single backend worker.
 
 ## Generation and cost controls
 
-- Three resumable text batches of 13 questions, using `grok-4.6` with low reasoning effort to reduce reasoning-token overhead.
+- Three resumable text batches of 13 questions, using `DeepSeek-V4-Flash`. The hosted service uses smaller six-question checkpoints for Edge Function time limits.
 - Four FLUX images, only for the four picture exercises. A Grok vision check compares the actual generated image against the answer choices; ambiguous images are retried at most once.
 - 39 cached audio recordings, with Canadian French Sylvie/Thierry voices and speaker changes for dialogues.
+- Spoken choices announce “Proposition A/B/C/D”, pause 700 ms, then read the choice. A short lead-in and 1.5-second gaps separate the propositions.
 - Standard `fr-CA-SylvieNeural` / `fr-CA-ThierryNeural` voices by default. To use HD, set the voice variables to `fr-CA-Sylvie:DragonHDLatestNeural` and `fr-CA-Thierry:DragonHDLatestNeural`.
 - One generation job at a time, two concurrent audio requests, bounded retries, and a configurable daily new-session limit (default 8).
 - Read timeouts are not silently retried: a timed-out provider call may already have been billed.
-- Reopening a session reuses its ID and media. A retry retains completed text batches, verified images and valid audio files. Only **Générer une nouvelle série** creates a new session.
+- Reopening a session reuses its ID and media. A retry retains completed text batches, verified images and valid audio files. **Nouveau test d'écoute** creates a new session.
 - Provider-reported token usage is recorded in the session's `usage.json`. Actual charges depend on the Azure deployments and pricing; there is no hard-coded price estimate.
 
 The training blueprint uses 4 picture questions, 6 spoken-response questions, 13 dialogues, and 16 reports, with progressive A1–C2 difficulty. This is an app-specific training distribution, not a claim about the official question distribution. Audio duration varies with generated content; practice is self-paced.

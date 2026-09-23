@@ -75,6 +75,9 @@ final class ExamFlowUITests: XCTestCase {
 
     @MainActor
     func testAIListeningDownloadsResumesAndReviewsAll39Questions() async throws {
+        #if !DEBUG
+        throw XCTSkip("The fixture-server integration test runs in Debug.")
+        #else
         do {
             let (_, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:8766/health")!)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.cannotConnectToHost) }
@@ -118,93 +121,54 @@ final class ExamFlowUITests: XCTestCase {
         app.terminate()
         app.launch()
         XCTAssertTrue(app.staticTexts["ai-result-score"].waitForExistence(timeout: 10))
+        #endif
     }
 
     @MainActor
-    func testPracticeRetainsAnswersAndShowsResults() {
+    func testCachedAudioRefreshesWithoutLosingAnswers() async throws {
+        #if !DEBUG
+        throw XCTSkip("The fixture-server integration test runs in Debug.")
+        #else
+        do {
+            let (_, response) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:8766/health")!)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.cannotConnectToHost) }
+        } catch {
+            throw XCTSkip("Start backend/tests/fixture_server.py on port 8766 to run the cache-refresh test.")
+        }
+        let sessionID = UUID().uuidString.lowercased()
         let app = XCUIApplication()
-        app.launchArguments = ["-test-reading-session"]
+        app.launchArguments = ["-test-ai-listening"]
+        app.launchEnvironment = ["TCF_BACKEND_URL": "http://127.0.0.1:8766", "TCF_BACKEND_TOKEN": "ui-test-token", "TCF_LISTENING_SESSION_ID": sessionID]
         app.launch()
-        XCTAssertTrue(app.buttons["answer-0"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["next-question"].isEnabled)
+        XCTAssertTrue(app.buttons["start-ai-listening"].waitForExistence(timeout: 45))
+        app.buttons["start-ai-listening"].tap()
+        app.buttons["ai-answer-0"].tap()
+        XCTAssertEqual(app.staticTexts["audio-duration-1"].label, "00:00")
+        app.terminate()
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:8766/test/update-audio/" + sessionID)!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer ui-test-token", forHTTPHeaderField: "Authorization")
+        let (_, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        app.launch()
+        XCTAssertTrue(app.buttons["ai-next"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["ai-next"].isEnabled)
+        XCTAssertEqual(app.staticTexts["audio-duration-1"].label, "00:01")
+        #endif
+    }
+
+    @MainActor
+    func testOnlyGeneratedPracticeIsOffered() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["listen_ai"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["MES TESTS"].exists)
         XCTAssertFalse(app.buttons["Examen"].exists)
-        app.buttons["answer-0"].tap()
-        app.buttons["next-question"].tap()
-        app.buttons["previous-question"].tap()
-        XCTAssertFalse(app.buttons["answer-0"].isEnabled)
-        XCTAssertTrue(app.buttons["next-question"].isEnabled)
-        app.buttons["next-question"].tap()
-        app.buttons["answer-0"].tap()
-        app.buttons["next-question"].tap()
-        XCTAssertTrue(app.staticTexts["Série terminée"].waitForExistence(timeout: 5))
-        app.buttons["Recommencer"].tap()
-        XCTAssertTrue(app.buttons["answer-0"].isEnabled)
-        XCTAssertFalse(app.buttons["next-question"].isEnabled)
-    }
-
-    @MainActor
-    func testLevelFilterAndFocusedPractice() {
-        let app = XCUIApplication()
-        app.launch()
-        app.buttons["Filtrer les séries : tous les niveaux"].tap()
-        app.buttons["Niveau B2"].tap()
-        XCTAssertTrue(app.buttons["read_b2"].exists)
-        XCTAssertFalse(app.buttons["read_a1_a2"].exists)
-        app.buttons["read_b2"].tap()
-        XCTAssertTrue(app.buttons["answer-0"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Examen"].exists)
-        app.buttons["Pratiques"].tap()
-        XCTAssertTrue(app.buttons["Examen"].waitForExistence(timeout: 5))
-    }
-
-    @MainActor
-    func testWritingOpensSelectedTaskAndRetainsDrafts() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-test-writing-list"]
-        app.launch()
-        app.buttons["write_t2"].tap()
-        XCTAssertTrue(app.staticTexts["Tâche 2 : Récit d'une expérience marquante"].exists)
-        let editor = app.textViews["writing-draft"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 5))
-        editor.tap()
-        editor.typeText("Mon brouillon pour la deuxieme tache.")
-        app.swipeDown()
-        app.buttons["Tâche 1"].tap()
-        XCTAssertEqual(editor.value as? String, "")
-        app.buttons["Tâche 2"].tap()
-        XCTAssertEqual(editor.value as? String, "Mon brouillon pour la deuxieme tache.")
-    }
-
-    @MainActor
-    func testExamAdvancesThroughAllFourSections() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-test-exam"]
-        app.launch()
-        app.swipeUp()
-        app.buttons["start-exam"].tap()
-        XCTAssertTrue(app.buttons["answer-0"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Scores"].exists)
-        for _ in 0..<6 {
-            app.buttons["answer-0"].tap()
-            // Exam answers remain editable; correctness is not revealed.
-            XCTAssertTrue(app.buttons["answer-0"].isEnabled)
-            app.buttons["next-question"].tap()
-        }
-        XCTAssertTrue(app.buttons["next-section"].waitForExistence(timeout: 5))
-        app.buttons["next-section"].tap()
-        XCTAssertFalse(app.buttons["Transcription"].exists)
-        for _ in 0..<10 {
-            app.buttons["answer-0"].tap()
-            app.buttons["next-question"].tap()
-        }
-        app.buttons["next-section"].tap()
-        XCTAssertTrue(app.textViews["writing-draft"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Modèle NCLC 7"].exists)
-        app.buttons["finish-section"].tap()
-        app.buttons["next-section"].tap()
-        XCTAssertTrue(app.buttons["Enregistrer la réponse"].waitForExistence(timeout: 5))
-        app.buttons["finish-section"].tap()
-        XCTAssertTrue(app.staticTexts["Session terminée."].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Scores"].exists)
+        XCTAssertFalse(app.buttons["read_a1_a2"].exists)
+        XCTAssertFalse(app.buttons["listen_yt11"].exists)
+        XCTAssertFalse(app.buttons["write_t1"].exists)
+        XCTAssertFalse(app.buttons["speak_t1"].exists)
+        XCTAssertFalse(app.staticTexts["SÉRIES DISPONIBLES HORS LIGNE"].exists)
     }
 }

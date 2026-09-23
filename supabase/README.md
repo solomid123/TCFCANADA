@@ -20,7 +20,11 @@ Run `backend/.venv/bin/python scripts/check-saved-tests.py` to verify persistenc
 
 ## Background jobs
 
-The `claim_tcf_listening_job` database function serializes claims and grants a short lease. Each Edge Function invocation handles one small checkpoint: three questions, one image, one image validation, one audio file, or final publication. Completed plan/media metadata are persisted immediately. Expired leases have bounded retries; user-requested retries preserve completed work.
+The `claim_tcf_listening_job` database function serializes claims and grants a short lease. Each Edge Function invocation handles one small checkpoint: up to six DeepSeek-V4-Flash questions, one image, one Grok image validation, up to three parallel audio files, or final publication. Completed plan/media metadata are persisted immediately. A partially failed audio batch preserves successful files and pauses for retry. Expired leases have bounded retries; user-requested retries preserve completed work.
+
+Audio version 2 announces each spoken choice as “Proposition A/B/C/D”, with a 700 ms pause before the text and 1.5 seconds between propositions. `audio.ts` is the hosted SSML source. After deploying, run `backend/.venv/bin/python scripts/refresh-proposition-audio.py` to upgrade saved spoken-choice recordings. It deduplicates identical scripts and atomically replaces metadata only when the previous hash still matches, preserving questions, answers and scores. Later deployments retain an existing seed instead of overwriting corrected media.
+
+`scripts/benchmark-question-models.py` compares the two text deployments using the same three-question request and validates both outputs. A measured sample completed in 15.38 seconds on DeepSeek-V4-Flash versus 59.60 seconds on Grok; timings vary and exclude image/audio preparation.
 
 The worker hands off to the next invocation, with a database cron trigger as a recovery path. Its internal endpoint requires a secret available only in Edge Function secrets and Supabase Vault. The backend is independent of the developer Mac.
 
@@ -34,7 +38,7 @@ Put `SUPABASE_ACCESS_TOKEN`, `SUPABASE_SECRET_KEY`, `SUPABASE_PROJECT_REF`, `SUP
 backend/.venv/bin/python scripts/deploy-cloud.py
 ```
 
-This applies the schema, enables anonymous device authentication, sets function secrets, uploads the existing seed media, deploys the function and configures the recovery trigger. For function-only updates, load the deployment token into the environment and run:
+This applies the schema, enables anonymous device authentication, sets function secrets, uploads seed media if no seed exists, deploys the function and configures the recovery trigger. For function-only updates, load the deployment token into the environment and run:
 
 ```sh
 supabase functions deploy listening-api --project-ref dpjrxzxidlpfzidqqllp --no-verify-jwt --use-api
@@ -46,10 +50,11 @@ Gateway JWT verification is disabled because the function explicitly validates b
 
 ```sh
 deno check --config supabase/functions/listening-api/deno.json supabase/functions/listening-api/index.ts
+deno test supabase/functions/listening-api/audio_test.ts
 python3 scripts/check-cloud.py
 backend/.venv/bin/python scripts/check-hosted-listening.py
 ```
 
-The hosted check signs in through the public API, downloads and checksums all 43 media files, verifies private-seed access protection, refreshes authentication and checks grading. Set `CHECK_CLOUD_WORKER=1` to additionally regenerate one final question/audio pair as a live, low-cost worker check.
+The hosted check signs in through the public API, downloads and checksums all 43 media files, verifies private-seed access protection, refreshes authentication and checks grading. Set `CHECK_CLOUD_WORKER=1` to additionally regenerate the final six questions and recordings, exercising the larger question batch and parallel audio while reusing the other 33 recordings.
 
 The `testHostedAutomaticConnectionWithoutServerSettings` UI test exercises automatic connection and relaunch. Run it with the Release configuration to also verify that the server-settings button is absent.

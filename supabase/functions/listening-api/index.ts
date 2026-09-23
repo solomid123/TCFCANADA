@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { AUDIO_VERSION, speechSSML, spokenTranscript } from "./audio.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 const project = Deno.env.get("SUPABASE_URL")!;
@@ -9,7 +10,7 @@ const seedID = "50f71ba1-5c93-4de7-b043-cf2c215fa4c6";
 const letters = ["A", "B", "C", "D"];
 type Turn = { speaker: "female" | "male"; text: string };
 type Question = { id: number; kind: string; level: string; question: string; turns: Turn[]; options: string[]; correct_index: number; explanation: string; image_prompt: string | null };
-type Asset = { name: string; path: string; sha256: string; bytes: number; duration?: number };
+type Asset = { name: string; path: string; sha256: string; bytes: number; duration?: number; audio_version?: number };
 type Session = { id: string; owner_id: string | null; state: string; phase: string; planned: number; images: number; audio: number; plan: Question[]; assets: Record<string, Asset>; image_checks: Record<string, boolean>; image_attempts: Record<string, number>; error: string | null; lease_token: string | null; last_answers: Record<string, number> | null; last_score: number | null; completed_at: string | null };
 const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-worker-secret", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers });
@@ -27,7 +28,7 @@ function manifest(s: Session) {
 }
 
 function transcript(q: Question) {
-  return [...q.turns.map(t => t.text), ...(["picture", "response"].includes(q.kind) ? q.options.map((o, i) => `${letters[i]}. ${o}`) : [q.question])].join("\n\n");
+  return spokenTranscript(q);
 }
 
 function grade(s: Session, answers: Record<string, number>) {
@@ -50,10 +51,11 @@ async function provider(url: string, init: RequestInit) {
   return response;
 }
 
-async function chat(messages: unknown[], maxTokens: number): Promise<Record<string, unknown>> {
+async function chat(messages: unknown[], maxTokens: number, purpose: "text" | "vision" = "text"): Promise<Record<string, unknown>> {
+  const model = purpose === "vision" ? "grok-4.6" : (Deno.env.get("AZURE_TEXT_DEPLOYMENT") || "DeepSeek-V4-Flash");
   const response = await provider("https://nedolinko-0140-resource.services.ai.azure.com/openai/v1/chat/completions", {
     method: "POST", headers: { "api-key": Deno.env.get("AZURE_API_KEY")!, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "grok-4.6", messages, reasoning_effort: "low", max_tokens: maxTokens, response_format: { type: "json_object" }, stream: true }),
+    body: JSON.stringify({ model, messages, ...(model.startsWith("grok") ? { reasoning_effort: "low" } : {}), max_tokens: maxTokens, response_format: { type: "json_object" }, stream: true }),
   });
   let content = "";
   let finish: string | undefined;
@@ -87,7 +89,7 @@ function validate(q: Question, id: number) {
 }
 
 async function draft(s: Session): Promise<Question[]> {
-  const numbers = Array.from({ length: Math.min(3, 39 - s.plan.length) }, (_, i) => s.plan.length + i + 1);
+  const numbers = Array.from({ length: Math.min(6, 39 - s.plan.length) }, (_, i) => s.plan.length + i + 1);
   const result = await chat([
     { role: "system", content: `Write original French listening practice, never official TCF material. JSON only {"questions":[...]}, exactly the supplied ids/kinds/levels. Each question has EXACT fields: id, kind, level, question (French), turns ([{speaker:"female"|"male",text:French}]), options (4 distinct French strings, no A/B/C/D prefixes), correct_index (integer 0..3), explanation (French, under 70 words), image_prompt (English or null). One unambiguously correct answer. Explanations quote wording, NEVER option letters or positions. Natural Canadian French, varied topics. No answer keys or stage directions in turns.
 picture: one clearly described image, no collage, no printed text/labels/logos. image_prompt describes the scene in English. Exactly one of the four short spoken descriptions fits the image; the others visibly contradict it. turns is just a neutral instruction, not a scene description. question="Quelle proposition correspond à l'image ?".
@@ -96,7 +98,7 @@ For picture/response the SERVER appends the four spoken propositions to the audi
 dialogue: 3–6 alternating female/male turns, 50–100 words total, question about the conversation, four written answers.
 report: 1–2 turns, 90–160 words total; advanced items test implicit meaning, viewpoint, nuance or intent with clear evidence in the script. Four written answers. image_prompt MUST be null for non-picture questions. Avoid repeating previous topics.` },
     { role: "user", content: JSON.stringify({ blueprint: numbers.map(blueprint), previous_topics: s.plan.map(q => q.question), seed: s.id }) },
-  ], 5000);
+  ], 9000);
   const questions = result.questions as Question[];
   if (!Array.isArray(questions) || questions.length !== numbers.length) throw new Error("Le nombre de questions reçues est incorrect.");
   questions.forEach((q, i) => {
@@ -113,7 +115,6 @@ report: 1–2 turns, 90–160 words total; advanced items test implicit meaning,
   return questions;
 }
 
-const escapeXML = (s: string) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const base64 = (bytes: Uint8Array) => {
   let text = "";
   for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192));
@@ -173,7 +174,7 @@ async function step(s: Session): Promise<Record<string, unknown>> {
       const result = await chat([
         { role: "system", content: 'Check a French picture exercise against the ACTUAL image. JSON {"valid":true|false,"matching_index":0|1|2|3|null}. Valid ONLY if exactly one proposition clearly matches visible evidence. Do not guess invisible facts.' },
         { role: "user", content: [{ type: "text", text: JSON.stringify(q.options) }, { type: "image_url", image_url: { url: `data:${s.assets[name].name.endsWith(".jpg") ? "image/jpeg" : "image/png"};base64,${base64(new Uint8Array(await data.arrayBuffer()))}`, detail: "low" } }] },
-      ], 600);
+      ], 600, "vision");
       if (result.valid === true && result.matching_index === q.correct_index) {
         const checks = { ...s.image_checks, [q.id]: true };
         return { image_checks: checks, images: Object.values(checks).filter(Boolean).length, phase: "Création des images" };
@@ -183,21 +184,25 @@ async function step(s: Session): Promise<Record<string, unknown>> {
       return { assets, phase: "Remplacement d'une image ambiguë" };
     }
   }
-  for (const q of s.plan) {
-    const name = `audio-${q.id}.wav`;
-    if (s.assets[name]) continue;
-    const voices = { female: "fr-CA-SylvieNeural", male: "fr-CA-ThierryNeural" };
-    let speech = q.turns.map(t => `<voice name="${voices[t.speaker]}"><lang xml:lang="fr-CA">${escapeXML(t.text)}</lang><break time="450ms"/></voice>`).join("");
-    const ending = ["picture", "response"].includes(q.kind) ? q.options.map((o, i) => `${letters[i]}. ${escapeXML(o)}<break time="900ms"/>`).join("") : escapeXML(q.question);
-    speech += `<voice name="${voices.female}"><lang xml:lang="fr-CA">${ending}</lang></voice>`;
+  const pendingAudio = s.plan.filter(q => !s.assets[`audio-${q.id}.wav`] || (["picture", "response"].includes(q.kind) && (s.assets[`audio-${q.id}.wav`].audio_version ?? 0) < AUDIO_VERSION)).slice(0, 3);
+  if (pendingAudio.length) {
+    const generated = await Promise.allSettled(pendingAudio.map(async q => {
+      const name = `audio-${q.id}.wav`;
     const response = await provider("https://nedolinko-0140-resource.cognitiveservices.azure.com/tts/cognitiveservices/v1", {
       method: "POST", headers: { "Ocp-Apim-Subscription-Key": Deno.env.get("AZURE_API_KEY")!, "Content-Type": "application/ssml+xml", "X-Microsoft-OutputFormat": "riff-24khz-16bit-mono-pcm" },
-      body: `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="fr-CA">${speech}</speak>`,
+      body: speechSSML(q),
     });
     const bytes = new Uint8Array(await response.arrayBuffer());
-    const asset = await put(s, name, bytes, "audio/wav", wavDuration(bytes));
-    const assets = { ...s.assets, [name]: asset };
-    return { assets, audio: Object.keys(assets).filter(k => k.startsWith("audio-")).length, phase: "Préparation des voix canadiennes" };
+      const asset = { ...await put(s, name, bytes, "audio/wav", wavDuration(bytes)), audio_version: AUDIO_VERSION };
+      return [name, asset] as const;
+    }));
+    // Persist successes before retrying a failed member of the batch.
+    const successes = generated.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+    if (!successes.length) throw (generated.find(result => result.status === "rejected") as PromiseRejectedResult).reason;
+    const assets = { ...s.assets, ...Object.fromEntries(successes) };
+    const failed = generated.some(result => result.status === "rejected");
+    return { assets, audio: Object.keys(assets).filter(k => k.startsWith("audio-")).length, phase: "Préparation des voix canadiennes",
+      ...(failed ? { state: "failed", error: "Un enregistrement n'a pas pu être préparé. Réessayez ; les autres sont conservés." } : {}) };
   }
   return { state: "ready", phase: "Votre session est prête", error: null };
 }
@@ -223,7 +228,7 @@ Deno.serve(async req => {
   try {
     if (path === "/health") {
       const seed = await admin.from(table).select("state").eq("id", seedID).maybeSingle();
-      return json({ status: "ok", service: "tcf-listening", api_version: 1, seed_ready: seed.data?.state === "ready" });
+      return json({ status: "ok", service: "tcf-listening", api_version: 1, seed_ready: seed.data?.state === "ready", text_model: Deno.env.get("AZURE_TEXT_DEPLOYMENT") || "DeepSeek-V4-Flash", audio_version: AUDIO_VERSION });
     }
     if (path === "/internal/worker") {
       const expected = Deno.env.get("TCF_WORKER_SECRET");

@@ -22,7 +22,8 @@ class AzureProvider:
         if not self.key:
             raise RuntimeError("AZURE_API_KEY is required")
         self.text_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "https://nedolinko-0140-resource.services.ai.azure.com/openai/v1").rstrip("/")
-        self.model = os.getenv("AZURE_TEXT_DEPLOYMENT", "grok-4.6")
+        self.model = os.getenv("AZURE_TEXT_DEPLOYMENT", "DeepSeek-V4-Flash")
+        self.vision_model = os.getenv("AZURE_VISION_DEPLOYMENT", "grok-4.6")
         self.reasoning_effort = os.getenv("AZURE_REASONING_EFFORT", "low")
         self.image_endpoint = os.getenv("AZURE_IMAGE_ENDPOINT", "https://nedolinko-0140-resource.services.ai.azure.com/providers/blackforestlabs/v1/flux-2-pro?api-version=preview")
         self.speech_endpoint = os.getenv("AZURE_SPEECH_ENDPOINT", "https://nedolinko-0140-resource.cognitiveservices.azure.com").rstrip("/")
@@ -57,11 +58,12 @@ class AzureProvider:
             raise ProviderError(f"Le fournisseur a refusé une requête (HTTP {response.status_code}). Vérifiez la configuration du serveur.")
         raise ProviderError("Service temporairement indisponible.")
 
-    async def chat(self, messages: list[dict], max_tokens: int) -> dict:
+    async def chat(self, messages: list[dict], max_tokens: int, model: str | None = None) -> dict:
+        deployment = model or self.model
         response = await self.request(
             f"{self.text_endpoint}/chat/completions",
             headers={"api-key": self.key},
-            json={"model": self.model, "messages": messages, "max_tokens": max_tokens, "reasoning_effort": self.reasoning_effort,
+            json={"model": deployment, "messages": messages, "max_tokens": max_tokens, **({"reasoning_effort": self.reasoning_effort} if deployment.startswith("grok") else {}),
                   "response_format": {"type": "json_object"}, "stream": True, "stream_options": {"include_usage": True}},
         )
         # SSE keeps the connection active during long generations. The completed response is
@@ -154,23 +156,24 @@ Difficulty should increase through the supplied levels. No Markdown. Avoid repea
                 {"type": "text", "text": json.dumps(question.options, ensure_ascii=False)},
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(image).decode(), "detail": "low"}},
             ]},
-        ], max_tokens=600)
+        ], max_tokens=600, model=self.vision_model)
         return result.get("valid") is True and type(result.get("matching_index")) is int and result["matching_index"] == question.correct_index
 
     def transcript(self, question: Question) -> str:
         parts = [turn.text for turn in question.turns]
         if question.kind in ("picture", "response"):
-            parts += [f"{letter}. {option}" for letter, option in zip("ABCD", question.options)]
+            parts += [f"Proposition {letter}. {option}" for letter, option in zip("ABCD", question.options)]
         else:
             parts.append(question.question)
         return "\n\n".join(parts)
 
     def ssml(self, question: Question) -> str:
         parts = []
-        for turn in question.turns:
-            parts.append(f"<voice name={quoteattr(self.voices[turn.speaker])}><lang xml:lang=\"fr-CA\">{escape(turn.text)}</lang><break time=\"450ms\"/></voice>")
-        ending = "".join(f"{letter}. {escape(option)}<break time=\"900ms\"/>" for letter, option in zip("ABCD", question.options)) if question.kind in ("picture", "response") else escape(question.question)
-        parts.append(f"<voice name={quoteattr(self.voices['female'])}><lang xml:lang=\"fr-CA\">{ending}</lang></voice>")
+        for index, turn in enumerate(question.turns):
+            lead_in = '<break time="900ms"/>' if index == 0 else ""
+            parts.append(f"<voice name={quoteattr(self.voices[turn.speaker])}><lang xml:lang=\"fr-CA\">{lead_in}{escape(turn.text)}</lang><break time=\"600ms\"/></voice>")
+        ending = "".join(f"Proposition {letter}.<break time=\"700ms\"/>{escape(option)}<break time=\"1500ms\"/>" for letter, option in zip("ABCD", question.options)) if question.kind in ("picture", "response") else escape(question.question)
+        parts.append(f"<voice name={quoteattr(self.voices['female'])}><lang xml:lang=\"fr-CA\"><break time=\"900ms\"/>{ending}</lang></voice>")
         return '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="fr-CA">' + "".join(parts) + '</speak>'
 
     async def audio(self, question: Question) -> bytes:

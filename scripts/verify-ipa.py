@@ -1,6 +1,7 @@
 """Validate the packaged device app, without claiming it is Apple-signed."""
 import hashlib
 import plistlib
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -18,7 +19,7 @@ with zipfile.ZipFile(path) as archive:
     assert cloud["publishableKey"].startswith("sb_publishable_")
     assert info["CFBundleIdentifier"] == "com.aetheris.tcfcanada"
     assert info["CFBundleSupportedPlatforms"] == ["iPhoneOS"], "Not a device build"
-    assert info.get("NSMicrophoneUsageDescription"), "Missing microphone usage description"
+    assert not any(re.search(r"/(q[1-7]\.m4a|q[1-3]_img\.png)$", name) for name in archive.namelist()), "Legacy bundled exercises must not be packaged"
     assert prefix + info["CFBundleExecutable"] in archive.namelist(), "Missing executable"
     assert not any(name.endswith(".xctest/") for name in archive.namelist()), "Test bundle must not be packaged"
     assert not any(".env" in Path(name).parts for name in archive.namelist()), "Environment configuration must not be packaged"

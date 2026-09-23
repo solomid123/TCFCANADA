@@ -253,6 +253,7 @@ struct AIListeningSessionView: View {
             HStack {
                 ProgressView(value: active ? min(player.elapsed, question.duration) : 0, total: max(1, question.duration)).tint(TCFTheme.emerald)
                 Text(time(active ? player.elapsed : question.duration)).font(.caption.monospacedDigit()).foregroundStyle(TCFTheme.textSecondary)
+                    .accessibilityIdentifier("audio-duration-\(question.id)")
             }
             if let error = player.error { errorMessage(error) }
         }

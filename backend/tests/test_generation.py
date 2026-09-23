@@ -142,7 +142,10 @@ class GenerationTests(unittest.IsolatedAsyncioTestCase):
         ssml = self.provider.ssml(question)
         self.assertIn("&amp;", ssml)
         self.assertIn("&lt;une réponse&gt;", ssml)
-        self.assertIn("A. À dix heures.", ssml)
+        self.assertIn('Proposition A.<break time="700ms"/>À dix heures.', ssml)
+        self.assertIn('<break time="900ms"/>Écoutez', ssml)
+        self.assertIn('<break time="1500ms"/>Proposition B.', ssml)
+        self.assertEqual(ssml.count("Proposition "), 4)
         self.assertNotIn(question.explanation, ssml)
         self.assertIn("fr-CA-SylvieNeural", ssml)
 
@@ -176,7 +179,8 @@ class ProviderCostTests(unittest.IsolatedAsyncioTestCase):
             import json
             body = json.loads(request.content)
             self.assertTrue(body["stream"])
-            self.assertEqual(body["reasoning_effort"], "low")
+            self.assertEqual(body["model"], "DeepSeek-V4-Flash")
+            self.assertNotIn("reasoning_effort", body)
             events = [
                 {"choices": [{"index": 0, "delta": {"content": '{"status":'}}]},
                 {"choices": [{"index": 0, "delta": {"content": '"ok"}'}, "finish_reason": "stop"}]},
@@ -184,7 +188,7 @@ class ProviderCostTests(unittest.IsolatedAsyncioTestCase):
             ]
             return httpx.Response(200, text="\n\n".join("data: " + json.dumps(event) for event in events) + "\n\ndata: [DONE]\n")
 
-        with patch.dict(os.environ, {"AZURE_API_KEY": "test-only", "AZURE_REASONING_EFFORT": "low"}):
+        with patch.dict(os.environ, {"AZURE_API_KEY": "test-only", "AZURE_TEXT_DEPLOYMENT": "DeepSeek-V4-Flash"}):
             provider = AzureProvider()
         await provider.client.aclose()
         provider.client = httpx.AsyncClient(transport=httpx.MockTransport(stream))
