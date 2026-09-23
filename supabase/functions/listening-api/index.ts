@@ -10,14 +10,14 @@ const letters = ["A", "B", "C", "D"];
 type Turn = { speaker: "female" | "male"; text: string };
 type Question = { id: number; kind: string; level: string; question: string; turns: Turn[]; options: string[]; correct_index: number; explanation: string; image_prompt: string | null };
 type Asset = { name: string; path: string; sha256: string; bytes: number; duration?: number };
-type Session = { id: string; owner_id: string | null; state: string; phase: string; planned: number; images: number; audio: number; plan: Question[]; assets: Record<string, Asset>; image_checks: Record<string, boolean>; image_attempts: Record<string, number>; error: string | null; lease_token: string | null };
+type Session = { id: string; owner_id: string | null; state: string; phase: string; planned: number; images: number; audio: number; plan: Question[]; assets: Record<string, Asset>; image_checks: Record<string, boolean>; image_attempts: Record<string, number>; error: string | null; lease_token: string | null; last_answers: Record<string, number> | null; last_score: number | null; completed_at: string | null };
 const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-worker-secret", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers });
 const status = (s: Session) => ({ id: s.id, state: s.state, phase: s.phase, planned: s.planned, images: s.images, audio: s.audio, total: 39, error: s.error });
 const publicAsset = (a: Asset) => ({ name: a.name, sha256: a.sha256, bytes: a.bytes });
 
 function manifest(s: Session) {
-  return { id: s.id, title: "Écoute · Session IA", questions: s.plan.map(q => ({
+  return { id: s.id, title: "Test d'écoute", questions: s.plan.map(q => ({
     id: q.id, kind: q.kind, level: q.level, question: q.question,
     options: ["picture", "response"].includes(q.kind) ? letters : q.options,
     audio: publicAsset(s.assets[`audio-${q.id}.wav`]),
@@ -28,6 +28,11 @@ function manifest(s: Session) {
 
 function transcript(q: Question) {
   return [...q.turns.map(t => t.text), ...(["picture", "response"].includes(q.kind) ? q.options.map((o, i) => `${letters[i]}. ${o}`) : [q.question])].join("\n\n");
+}
+
+function grade(s: Session, answers: Record<string, number>) {
+  return { correct: s.plan.filter(q => answers[q.id] === q.correct_index).length, total: 39, answered: Object.keys(answers).length,
+    questions: s.plan.map(q => ({ id: q.id, options: q.options, correct_index: q.correct_index, explanation: q.explanation, transcript: transcript(q) })) };
 }
 
 async function kick() {
@@ -231,7 +236,16 @@ Deno.serve(async req => {
     const auth = await admin.auth.getUser(jwt);
     if (auth.error || !auth.data.user) return json({ detail: "Session expirée. Réessayez." }, 401);
     const owner = auth.data.user.id;
-    const match = path.match(/^\/v1\/listening\/sessions\/([a-f0-9-]{36})(?:\/(content|submit|assets)(?:\/([^/]+))?)?$/i);
+    if (path === "/v1/listening/sessions" && req.method === "GET") {
+      const offset = Math.max(0, Number.parseInt(new URL(req.url).searchParams.get("offset") ?? "0", 10) || 0);
+      const [saved, count] = await Promise.all([
+        admin.from(table).select("id,state,phase,planned,created_at,completed_at,last_score").eq("owner_id", owner).order("created_at", { ascending: false }).range(offset, offset + 49),
+        admin.rpc("count_tcf_bank_questions", { p_owner: owner }),
+      ]);
+      if (saved.error || count.error) throw new Error("Historique indisponible.");
+      return json({ sessions: saved.data, bank_count: Number(count.data ?? 39), has_more: saved.data.length === 50 });
+    }
+    const match = path.match(/^\/v1\/listening\/sessions\/([a-f0-9-]{36})(?:\/(content|submit|assets|attempt)(?:\/([^/]+))?)?$/i);
     if (!match || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(match[1])) return json({ detail: "Not found" }, 404);
     const id = match[1].toLowerCase();
     const action = match[2];
@@ -264,6 +278,7 @@ Deno.serve(async req => {
     if (!action && req.method === "GET") return json(status(s));
     if (s.state !== "ready") return json({ detail: "La session est encore en préparation." }, 409);
     if (action === "content" && req.method === "GET") return json(manifest(s));
+    if (action === "attempt" && req.method === "GET") return json({ answers: s.last_answers ?? {}, result: s.last_answers ? grade(s, s.last_answers) : null });
     if (action === "assets" && req.method === "GET") {
       const asset = Object.values(s.assets).find(a => a.name === match[3]);
       if (!asset || !/^(audio-\d+\.wav|image-\d+\.(png|jpg))$/.test(match[3])) return json({ detail: "Not found" }, 404);
@@ -275,8 +290,10 @@ Deno.serve(async req => {
       const body = await req.json();
       const answers = body.answers;
       if (!answers || Array.isArray(answers) || typeof answers !== "object" || Object.entries(answers).some(([key, value]) => !/^([1-9]|[12][0-9]|3[0-9])$/.test(key) || !Number.isInteger(value) || Number(value) < 0 || Number(value) > 3)) return json({ detail: "Réponses invalides." }, 422);
-      return json({ correct: s.plan.filter(q => answers[q.id] === q.correct_index).length, total: 39, answered: Object.keys(answers).length,
-        questions: s.plan.map(q => ({ id: q.id, options: q.options, correct_index: q.correct_index, explanation: q.explanation, transcript: transcript(q) })) });
+      const result = grade(s, answers);
+      const saved = await admin.from(table).update({ last_answers: answers, last_score: result.correct, completed_at: new Date().toISOString() }).eq("id", id).eq("owner_id", owner);
+      if (saved.error) throw new Error("Impossible de sauvegarder le bilan.");
+      return json(result);
     }
     return json({ detail: "Not found" }, 404);
   } catch {

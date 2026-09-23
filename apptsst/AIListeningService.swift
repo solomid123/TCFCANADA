@@ -144,14 +144,14 @@ final class AIListeningStore: ObservableObject {
         return questions[index]
     }
 
-    func prepare(retry: Bool = false, newSession: Bool = false) {
+    func prepare(retry: Bool = false, newSession: Bool = false, savedSessionID: String? = nil) {
         preparation?.cancel()
-        preparation = Task { await load(retry: retry, newSession: newSession) }
+        preparation = Task { await load(retry: retry, newSession: newSession, savedSessionID: savedSessionID) }
     }
 
     func cancelPreparation() { preparation?.cancel() }
 
-    private func load(retry: Bool, newSession: Bool) async {
+    private func load(retry: Bool, newSession: Bool, savedSessionID: String?) async {
         stage = .preparing
         error = nil
         job = nil
@@ -171,7 +171,7 @@ final class AIListeningStore: ObservableObject {
             #endif
             let hostKey = SHA256.hash(data: Data(baseURL.utf8)).map { String(format: "%02x", $0) }.joined()
             let defaultsKey = "ai-listening-session-\(hostKey)"
-            let storedID = ProcessInfo.processInfo.environment["TCF_LISTENING_SESSION_ID"] ?? UserDefaults.standard.string(forKey: defaultsKey)
+            let storedID = savedSessionID ?? ProcessInfo.processInfo.environment["TCF_LISTENING_SESSION_ID"] ?? UserDefaults.standard.string(forKey: defaultsKey)
             sessionID = (!newSession ? storedID.flatMap { UUID(uuidString: $0)?.uuidString.lowercased() } : nil) ?? UUID().uuidString.lowercased()
             UserDefaults.standard.set(sessionID, forKey: defaultsKey)
             let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
@@ -184,7 +184,11 @@ final class AIListeningStore: ObservableObject {
             if let data = try? Data(contentsOf: directory.appendingPathComponent("manifest.json")),
                let cached = try? decoder.decode(AIListeningManifest.self, from: data), isValid(cached) {
                 manifest = cached
-                if allAssetsValid(cached) { restoreStage(); return }
+                if allAssetsValid(cached) {
+                    await restoreCompletedTest()
+                    restoreStage()
+                    return
+                }
             }
             guard AIListeningConnection.isHosted(baseURL) || !AIListeningConnection.token(for: baseURL).isEmpty else {
                 throw AIListeningError.message("La connexion au serveur de développement n'est pas configurée.")
@@ -217,6 +221,7 @@ final class AIListeningStore: ObservableObject {
                 }
                 downloads += 1
             }
+            await restoreCompletedTest()
             restoreStage()
         } catch is CancellationError {
             // Returning to the hub leaves the backend job intact for the next visit.
@@ -229,6 +234,25 @@ final class AIListeningStore: ObservableObject {
         attempt.index = min(max(0, attempt.index), 38)
         attempt.answers = attempt.answers.filter { (1...39).contains($0.key) && (0...3).contains($0.value) }
         stage = attempt.result != nil ? .review : attempt.started ? .practice : .ready
+    }
+
+    private func restoreCompletedTest() async {
+        guard attempt.result == nil, AIListeningConnection.isHosted(baseURL) else { return }
+        struct SavedAttempt: Decodable {
+            let answers: [String: Int]
+            let result: AIListeningResult?
+        }
+        guard let saved: SavedAttempt = try? await request("/attempt"), let result = saved.result,
+              result.total == 39, result.questions.map(\.id) == Array(1...39),
+              result.questions.allSatisfy({ $0.options.count == 4 && (0...3).contains($0.correctIndex) }) else { return }
+        attempt.answers = Dictionary(uniqueKeysWithValues: saved.answers.compactMap { key, value in
+            guard let id = Int(key), (1...39).contains(id), (0...3).contains(value) else { return nil }
+            return (id, value)
+        })
+        attempt.result = result
+        attempt.index = 38
+        attempt.started = true
+        saveAttempt()
     }
 
     private func isValid(_ content: AIListeningManifest) -> Bool {
@@ -279,7 +303,10 @@ final class AIListeningStore: ObservableObject {
 
     private func saveAttempt() {
         guard let folder else { return }
-        do { try JSONEncoder().encode(attempt).write(to: folder.appendingPathComponent("attempt.json"), options: .atomic) }
+        do {
+            try JSONEncoder().encode(attempt).write(to: folder.appendingPathComponent("attempt.json"), options: .atomic)
+            UserDefaults.standard.set(attempt.answers.count, forKey: "listening-progress-\(sessionID)")
+        }
         catch { self.error = "Impossible de sauvegarder votre progression sur cet appareil." }
     }
 

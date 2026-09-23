@@ -4,7 +4,9 @@ SwiftUI preparation app with reading, listening, writing, and speaking exercises
 
 ## AI listening
 
-**Écoute → Session IA · 39 questions** prepares a complete AI-generated session using Azure-hosted `grok-4.6`, FLUX.2-pro images, and Canadian French Azure Speech voices. It downloads the media before practice, restores saved answers after relaunch, and provides all 39 transcripts and corrections at the end.
+**Écoute → Banque d'écoute → Nouveau test d'écoute** prepares a complete 39-question test. The backend uses Azure-hosted `grok-4.6`, FLUX.2-pro images, and Canadian French Azure Speech voices. The app downloads the media before practice, restores saved answers after relaunch, and provides all 39 transcripts and corrections at the end.
+
+**Mes tests** keeps prepared tests, in-progress tests and completed scores accessible from the practice page. Completed answers and corrections are stored in the hosted backend as well as on the device. The bank counter reports distinct available listening questions from the user's saved tests and starter set; it is not a hard-coded inventory claim.
 
 The release app connects automatically to the hosted Supabase function. It creates an anonymous device session and stores its refresh token in Keychain. `apptsst/CloudConfiguration.plist` contains only the public project URL and publishable key. Azure credentials stay in function secrets.
 
@@ -14,7 +16,7 @@ See [`supabase/README.md`](supabase/README.md) for the hosted deployment and [`b
 
 ## Sideloading IPA
 
-Run `bash scripts/build-ipa.sh` with Xcode selected. The script checks that the hosted API and starter session are ready, builds a Release device archive, and writes `dist/TCFCanada-AI-AutoConnect.ipa`. A sideloading tool must sign the IPA for the destination iPhone. The connection settings screen is available only in Debug builds.
+Run `bash scripts/build-ipa.sh` with Xcode selected. The script checks that the hosted API and starter session are ready, builds a Release device archive, and writes `dist/TCFCanada-QuestionBank.ipa`. A sideloading tool must sign the IPA for the destination iPhone. The connection settings screen is available only in Debug builds.
 
 ## App structure
 

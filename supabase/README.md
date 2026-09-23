@@ -12,6 +12,12 @@ Every session API request validates the user's JWT through Supabase Auth and che
 
 The initial session is cloned from a prepared seed, sharing its immutable media. Reopening a session and reviewing answers do not call Azure again. Selecting a new series creates a queued generation job.
 
+## Saved tests
+
+`GET /v1/listening/sessions?offset=0` lists the authenticated owner's prepared and completed tests, in pages of 50. It includes a deduplicated count of questions in that user's ready tests and starter set. Submission persists answers, score and completion date. `GET /v1/listening/sessions/{id}/attempt` restores the owner's saved answers and full correction. No answer keys are included in the practice manifest or history list.
+
+Run `backend/.venv/bin/python scripts/check-saved-tests.py` to verify persistence, score restoration and cross-owner isolation without generating paid content. The `testCompletedListeningTestReopensFromQuestionBank` UI test completes a test, reopens its result from Mes tests and repeats after app relaunch.
+
 ## Background jobs
 
 The `claim_tcf_listening_job` database function serializes claims and grants a short lease. Each Edge Function invocation handles one small checkpoint: three questions, one image, one image validation, one audio file, or final publication. Completed plan/media metadata are persisted immediately. Expired leases have bounded retries; user-requested retries preserve completed work.

@@ -2,11 +2,14 @@ import SwiftUI
 
 struct AIListeningSessionView: View {
     let onBack: () -> Void
+    var initialSessionID: String? = nil
+    var startNewSession = false
     @StateObject private var store = AIListeningStore()
     @StateObject private var player = AIListeningPlayer()
     @State private var showConnection = false
     @State private var mistakesOnly = false
     @State private var expandedQuestion: Int?
+    @State private var didLoad = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -20,7 +23,12 @@ struct AIListeningSessionView: View {
         }
         .foregroundStyle(TCFTheme.textPrimary)
         .padding(.top, 8)
-        .onAppear { store.prepare() }
+        .onAppear {
+            if !didLoad {
+                didLoad = true
+                store.prepare(newSession: startNewSession, savedSessionID: initialSessionID)
+            }
+        }
         .onDisappear { player.stop(); store.cancelPreparation() }
         #if DEBUG
         .sheet(isPresented: $showConnection) {
@@ -41,7 +49,7 @@ struct AIListeningSessionView: View {
             }
             .whiteGlassButton()
             Spacer()
-            Label("ÉCOUTE IA", systemImage: "sparkles")
+            Label("COMPRÉHENSION ORALE", systemImage: "headphones")
                 .font(.system(size: 11, weight: .bold)).tracking(1)
             Spacer()
             #if DEBUG
@@ -62,9 +70,9 @@ struct AIListeningSessionView: View {
             VStack(alignment: .leading, spacing: 24) {
                 Image(systemName: "waveform.badge.mic")
                     .font(.system(size: 48, weight: .light)).foregroundStyle(TCFTheme.emerald)
-                Text("Votre prochaine écoute\nprend forme.")
+                Text("Votre prochain test\nse prépare.")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
-                Text("39 questions originales, des images et des voix françaises canadiennes. Nous préparons tout avant de commencer.")
+                Text("39 questions progressives, des illustrations et des voix françaises canadiennes. Votre test sera disponible dans Mes tests.")
                     .font(.subheadline).foregroundStyle(TCFTheme.textSecondary)
                 VStack(alignment: .leading, spacing: 18) {
                     progressRow("Questions", count: store.job?.planned ?? 0, total: 39, icon: "text.bubble")
@@ -94,7 +102,7 @@ struct AIListeningSessionView: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                     #endif
                 }
-                Text("Vous pouvez revenir plus tard. Les éléments déjà générés sont conservés pour éviter de les payer à nouveau.")
+                Text("Vous pouvez revenir plus tard. Retrouvez ce test et votre progression dans votre banque d'entraînement.")
                     .font(.caption).foregroundStyle(TCFTheme.textSecondary)
             }
             .padding(24)
@@ -136,7 +144,7 @@ struct AIListeningSessionView: View {
                 }
                 .whiteGlassButton(isPrimary: true)
                 .accessibilityIdentifier("start-ai-listening")
-                Text("Contenu généré par IA pour la pratique. Ce n'est pas une épreuve officielle TCF.")
+                Text("Entraînement au format TCF Canada. Votre bilan reste disponible dans Mes tests.")
                     .font(.caption).foregroundStyle(TCFTheme.textMuted)
             }
             .padding(24)
@@ -266,6 +274,12 @@ struct AIListeningSessionView: View {
                         Text("bonnes réponses · score d'entraînement").font(.subheadline).foregroundStyle(TCFTheme.textSecondary)
                     }
                     .padding(.vertical, 12)
+                    Button(action: onBack) {
+                        Label("Mes tests", systemImage: "tray.full")
+                            .frame(maxWidth: .infinity).padding(.vertical, 8)
+                    }
+                    .whiteGlassButton()
+                    .accessibilityIdentifier("open-saved-listening-tests")
                     Picker("Afficher les corrections", selection: $mistakesOnly) {
                         Text("Toutes (39)").tag(false)
                         Text("Erreurs (\(39 - result.correct))").tag(true)
@@ -285,11 +299,11 @@ struct AIListeningSessionView: View {
                         mistakesOnly = false
                         store.prepare(newSession: true)
                     } label: {
-                        Label("Générer une nouvelle série", systemImage: "sparkles")
+                        Label("Nouveau test d'écoute", systemImage: "plus.circle")
                             .frame(maxWidth: .infinity).padding(.vertical, 10).foregroundStyle(.white)
                     }
                     .whiteGlassButton(isPrimary: true)
-                    Text("Cette correction reste enregistrée sur votre appareil. Une nouvelle série déclenche une nouvelle génération.")
+                    Text("Ce test et sa correction sont enregistrés dans Mes tests. Vous pouvez les consulter à nouveau à tout moment.")
                         .font(.caption).foregroundStyle(TCFTheme.textSecondary)
                 }
                 .padding(.horizontal, 20).padding(.bottom, 24)

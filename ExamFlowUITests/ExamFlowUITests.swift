@@ -4,6 +4,49 @@ final class ExamFlowUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
+    func testCompletedListeningTestReopensFromQuestionBank() async throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-test-ai-listening"]
+        app.launchEnvironment = ["TCF_USE_HOSTED_LISTENING": "1"]
+        app.launch()
+        let connected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.buttons["start-ai-listening"].exists || app.buttons["ai-next"].exists || app.staticTexts["ai-result-score"].exists
+        }, object: nil)
+        let connection = await XCTWaiter.fulfillment(of: [connected], timeout: 120)
+        XCTAssertEqual(connection, .completed)
+        XCTAssertFalse(app.staticTexts["ÉCOUTE IA"].exists)
+        if app.buttons["start-ai-listening"].exists { app.buttons["start-ai-listening"].tap() }
+        for _ in 0..<39 where app.buttons["ai-next"].exists {
+            app.buttons["ai-answer-0"].tap()
+            let finishing = app.buttons["ai-next"].label.contains("Terminer")
+            app.buttons["ai-next"].tap()
+            if finishing { break }
+        }
+        XCTAssertTrue(app.staticTexts["ai-result-score"].waitForExistence(timeout: 15))
+        let score = app.staticTexts["ai-result-score"].label
+        app.buttons["open-saved-listening-tests"].tap()
+        let saved = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'saved-listening-'")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 20))
+        let completed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Terminé'"), object: saved)
+        let savedResult = await XCTWaiter.fulfillment(of: [completed], timeout: 20)
+        XCTAssertEqual(savedResult, .completed)
+        for _ in 0..<4 where !saved.isHittable { app.swipeUp() }
+        XCTAssertTrue(saved.label.contains("Terminé"))
+        saved.tap()
+        XCTAssertTrue(app.staticTexts["ai-result-score"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.staticTexts["ai-result-score"].label, score)
+        app.terminate()
+        app.launchArguments = ["-test-listening-library"]
+        app.launch()
+        let reopened = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'saved-listening-'")).firstMatch
+        XCTAssertTrue(reopened.waitForExistence(timeout: 20))
+        for _ in 0..<4 where !reopened.isHittable { app.swipeUp() }
+        reopened.tap()
+        XCTAssertTrue(app.staticTexts["ai-result-score"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.staticTexts["ai-result-score"].label, score)
+    }
+
+    @MainActor
     func testHostedAutomaticConnectionWithoutServerSettings() async throws {
         let app = XCUIApplication()
         app.launchArguments = ["-test-ai-listening"]

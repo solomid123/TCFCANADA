@@ -5,12 +5,17 @@ struct PreparationView: View {
     @State private var selectedSkill = 0
     @State private var selectedPractice: TCFPracticeItem?
     @State private var selectedLevel: CEFRLevel?
+    @StateObject private var listeningLibrary = ListeningLibrary()
+    @State private var savedListeningSessionID: String?
+    @State private var startNewListeningTest = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(isPracticeActive: Binding<Bool> = .constant(false)) {
         _isPracticeActive = isPracticeActive
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-test-ai-listening") {
+        if arguments.contains("-test-listening-library") {
+            _selectedSkill = State(initialValue: 1)
+        } else if arguments.contains("-test-ai-listening") {
             _selectedSkill = State(initialValue: 1)
             _selectedPractice = State(initialValue: Self.aiListeningPractice)
         } else if arguments.contains("-test-reading-session") {
@@ -26,7 +31,7 @@ struct PreparationView: View {
         }
     }
 
-    private static let aiListeningPractice = TCFPracticeItem(id: "listen_ai", title: "Session IA · 39 questions", subtitle: "Voix françaises canadiennes", levelBadge: "A1–C2", questionCountText: "39 questions", durationText: "À votre rythme", iconName: "sparkles")
+    private static let aiListeningPractice = TCFPracticeItem(id: "listen_ai", title: "Nouveau test d'écoute", subtitle: "Voix françaises canadiennes", levelBadge: "A1–C2", questionCountText: "39 questions", durationText: "À votre rythme", iconName: "headphones")
 
     private var currentPractices: [TCFPracticeItem] {
         switch selectedSkill {
@@ -82,11 +87,11 @@ struct PreparationView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Un peu chaque jour.")
+                    Text("Votre banque d'entraînement.")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .tracking(-1)
                         .foregroundStyle(TCFTheme.textPrimary)
-                    Text("Votre prochaine étape vers le TCF Canada.")
+                    Text("Questions, exercices et tests pour progresser.")
                         .font(.subheadline)
                         .foregroundStyle(TCFTheme.textSecondary)
                 }
@@ -109,7 +114,12 @@ struct PreparationView: View {
                     }
 
                     if selectedSkill == 1 {
-                        practiceGroup(title: "VOTRE SESSION PERSONNALISÉE", practices: [Self.aiListeningPractice])
+                        if let count = listeningLibrary.bankCount {
+                            Label("\(count.formatted()) questions dans votre banque d'écoute", systemImage: "books.vertical")
+                                .font(.system(size: 12, weight: .medium)).foregroundStyle(TCFTheme.textSecondary)
+                        }
+                        practiceGroup(title: "BANQUE D'ÉCOUTE", practices: [Self.aiListeningPractice])
+                        savedListeningTests
                     }
                     practiceGroup(title: selectedSkill == 1 ? "SÉRIES DISPONIBLES HORS LIGNE" : selectedSkill < 2 ? "ENTRAÎNEMENT CIBLÉ" : "LES 3 TÂCHES", practices: filteredPractices.filter { !$0.isResource && !$0.isCompleteSeries })
                     practiceGroup(title: "POUR ALLER PLUS LOIN", practices: filteredPractices.filter(\.isCompleteSeries))
@@ -119,6 +129,9 @@ struct PreparationView: View {
             }
             .padding(.horizontal, 22)
             .padding(.bottom, 24)
+        }
+        .task(id: selectedSkill) {
+            if selectedSkill == 1 { await listeningLibrary.reload() }
         }
     }
 
@@ -194,6 +207,10 @@ struct PreparationView: View {
 
     private func practiceCard(_ practice: TCFPracticeItem) -> some View {
         Button {
+            if practice.id == "listen_ai" {
+                savedListeningSessionID = nil
+                startNewListeningTest = true
+            }
             selectedPractice = practice
         } label: {
             HStack(spacing: 14) {
@@ -234,7 +251,7 @@ struct PreparationView: View {
     @ViewBuilder
     private func practiceSessionView(practice: TCFPracticeItem) -> some View {
         if practice.id == "listen_ai" {
-            AIListeningSessionView(onBack: closePractice)
+            AIListeningSessionView(onBack: closePractice, initialSessionID: savedListeningSessionID, startNewSession: startNewListeningTest)
         } else if practice.id == "ideas_bank" {
             TCFIdeasBankView(onBack: closePractice)
         } else if practice.id == "write_connectors" {
@@ -245,6 +262,54 @@ struct PreparationView: View {
             case 2: ExpressionEcriteView(practice: practice, onBack: closePractice)
             case 3: ExpressionOraleView(practice: practice, onBack: closePractice)
             default: ComprehensionEcriteView(practice: practice, onBack: closePractice)
+            }
+        }
+    }
+
+    private var savedListeningTests: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("MES TESTS").font(.system(size: 10, weight: .bold)).tracking(1.6)
+                Spacer()
+                if listeningLibrary.isLoading { ProgressView() }
+            }
+            .foregroundStyle(TCFTheme.textMuted).padding(.leading, 4)
+            if listeningLibrary.tests.isEmpty && !listeningLibrary.isLoading {
+                Text("Vos tests préparés et vos résultats apparaîtront ici.")
+                    .font(.subheadline).foregroundStyle(TCFTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).whiteGlassCard()
+            }
+            ForEach(listeningLibrary.tests) { test in
+                Button {
+                    savedListeningSessionID = test.id
+                    startNewListeningTest = false
+                    selectedPractice = Self.aiListeningPractice
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: test.completedAt != nil ? "checkmark.seal" : test.state == "ready" ? "doc.text" : "clock")
+                            .font(.system(size: 22)).foregroundStyle(TCFTheme.emerald)
+                            .frame(width: 34)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(test.dateLabel).font(.system(size: 14, weight: .semibold))
+                            Text(test.detail).font(.system(size: 12)).foregroundStyle(TCFTheme.textSecondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(17)
+                    .foregroundStyle(TCFTheme.textPrimary).multilineTextAlignment(.leading)
+                }
+                .whiteGlassButton(cornerRadius: 24)
+                .accessibilityIdentifier("saved-listening-\(test.id)")
+            }
+            if listeningLibrary.hasMore {
+                Button("Charger plus de tests") { Task { await listeningLibrary.reload(loadMore: true) } }
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            if let error = listeningLibrary.error {
+                Text(error).font(.caption).foregroundStyle(TCFTheme.textSecondary)
+                Button("Actualiser mes tests") { Task { await listeningLibrary.reload() } }
+                    .frame(minHeight: 44)
             }
         }
     }

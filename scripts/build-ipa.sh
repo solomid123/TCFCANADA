@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$ROOT/build-ipa"
 ARCHIVE="$BUILD_DIR/TCFCanada.xcarchive"
 STAGING="$BUILD_DIR/staging"
-OUTPUT="$ROOT/dist/TCFCanada-AI-AutoConnect.ipa"
+OUTPUT="$ROOT/dist/TCFCanada-QuestionBank.ipa"
 
 python3 "$ROOT/scripts/check-cloud.py"
 
@@ -19,7 +19,7 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   SUPPORTED_PLATFORMS=iphoneos \
   TARGETED_DEVICE_FAMILY=1,2 \
-  CURRENT_PROJECT_VERSION=3 \
+  CURRENT_PROJECT_VERSION=4 \
   archive
 
 python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1], ignore_errors=True)' "$STAGING"

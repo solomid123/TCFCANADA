@@ -33,7 +33,8 @@ async def main():
         async def sql(query):
             return checked(await client.post(f"https://api.supabase.com/v1/projects/{REF}/database/query", headers=MANAGEMENT, json={"query": query})).json()
 
-        await sql((ROOT / "supabase/migrations/202609230001_listening.sql").read_text())
+        for migration in sorted((ROOT / "supabase/migrations").glob("*.sql")):
+            await sql(migration.read_text())
         print("Database schema and access restrictions deployed.", flush=True)
         checked(await client.patch(f"https://api.supabase.com/v1/projects/{REF}/config/auth", headers=MANAGEMENT, json={"external_anonymous_users_enabled": True}))
         print("Automatic anonymous device sessions enabled.", flush=True)
