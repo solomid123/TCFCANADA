@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+backend/data/
+build*/
+dist/
+*.ipa
+Payload/
+xcuserdata/
+*.xcuserstate
+supabase/.temp/
+*.xcresult/
+.DS_Store

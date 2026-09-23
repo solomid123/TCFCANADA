@@ -1,0 +1,4 @@
+project_id = "dpjrxzxidlpfzidqqllp"
+
+[functions.listening-api]
+verify_jwt = false
