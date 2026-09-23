@@ -6,6 +6,8 @@ struct PreparationView: View {
     @State private var isShowingSession = false
     @State private var savedSessionID: String?
     @State private var startNewTest = false
+    @State private var selectedSkill = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(isPracticeActive: Binding<Bool> = .constant(false)) {
         _isPracticeActive = isPracticeActive
@@ -28,13 +30,18 @@ struct PreparationView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Votre banque d'écoute.")
+                    Text("Votre banque d'entraînement.")
                         .font(.system(size: 32, weight: .bold, design: .rounded)).tracking(-1)
-                    Text("Des tests pour affiner votre écoute, à votre rythme.")
+                    Text("Questions, exercices et tests pour progresser.")
                         .font(.subheadline).foregroundStyle(TCFTheme.textSecondary)
                 }
                 .padding(.top, 10)
 
+                skillSelector
+
+                if selectedSkill == 1 {
+                Text("Compréhension orale")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
                 if let count = listeningLibrary.bankCount {
                     Label("\(count.formatted()) questions dans votre banque", systemImage: "books.vertical")
                         .font(.system(size: 12, weight: .medium)).foregroundStyle(TCFTheme.textSecondary)
@@ -67,12 +74,58 @@ struct PreparationView: View {
                 .accessibilityIdentifier("listen_ai")
 
                 savedTests
+                } else {
+                    unavailableSkill
+                }
             }
             .foregroundStyle(TCFTheme.textPrimary)
             .padding(.horizontal, 22).padding(.bottom, 28)
         }
-        .task { await listeningLibrary.reload() }
-        .refreshable { await listeningLibrary.reload() }
+        .task(id: selectedSkill) { if selectedSkill == 1 { await listeningLibrary.reload() } }
+        .refreshable { if selectedSkill == 1 { await listeningLibrary.reload() } }
+    }
+
+    private var skillSelector: some View {
+        HStack(spacing: 6) {
+            skillButton("Lecture", icon: "book", index: 0)
+            skillButton("Écoute", icon: "headphones", index: 1)
+            skillButton("Écriture", icon: "pencil.line", index: 2)
+            skillButton("Parole", icon: "mic", index: 3)
+        }
+        .padding(6).tcfGlass(cornerRadius: 26)
+    }
+
+    private func skillButton(_ title: String, icon: String, index: Int) -> some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { selectedSkill = index }
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: icon).font(.system(size: 21, weight: .medium))
+                Text(title).font(.system(size: 11, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(selectedSkill == index ? TCFTheme.azureBlue : TCFTheme.textSecondary)
+            .frame(maxWidth: .infinity).padding(.vertical, 14)
+            .background {
+                if selectedSkill == index { RoundedRectangle(cornerRadius: 20).fill(.white.opacity(0.65)) }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 20))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selectedSkill == index ? .isSelected : [])
+    }
+
+    private var unavailableSkill: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(["Compréhension écrite", "Compréhension orale", "Expression écrite", "Expression orale"][selectedSkill])
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Banque en préparation", systemImage: "books.vertical")
+                    .font(.headline)
+                Text("Les nouveaux tests de cette compétence seront disponibles ici.")
+                    .font(.subheadline).foregroundStyle(TCFTheme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).whiteGlassCard()
+        }
     }
 
     private var savedTests: some View {

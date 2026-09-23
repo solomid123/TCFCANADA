@@ -158,17 +158,33 @@ final class ExamFlowUITests: XCTestCase {
     }
 
     @MainActor
-    func testOnlyGeneratedPracticeIsOffered() {
+    func testMenusRemainWhileOfflineSamplesAreRemoved() {
         let app = XCUIApplication()
         app.launch()
         XCTAssertTrue(app.buttons["listen_ai"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["MES TESTS"].exists)
-        XCTAssertFalse(app.buttons["Examen"].exists)
-        XCTAssertFalse(app.buttons["Scores"].exists)
+        for title in ["Pratique", "Examen", "Scores", "Lecture", "Écoute", "Écriture", "Parole"] {
+            XCTAssertTrue(app.buttons[title].exists, "Missing menu: \(title)")
+        }
         XCTAssertFalse(app.buttons["read_a1_a2"].exists)
         XCTAssertFalse(app.buttons["listen_yt11"].exists)
         XCTAssertFalse(app.buttons["write_t1"].exists)
         XCTAssertFalse(app.buttons["speak_t1"].exists)
         XCTAssertFalse(app.staticTexts["SÉRIES DISPONIBLES HORS LIGNE"].exists)
+        app.buttons["Lecture"].tap()
+        XCTAssertTrue(app.staticTexts["Compréhension écrite"].exists)
+        app.buttons["Écriture"].tap()
+        XCTAssertTrue(app.staticTexts["Expression écrite"].exists)
+        app.buttons["Parole"].tap()
+        XCTAssertTrue(app.staticTexts["Expression orale"].exists)
+        app.buttons["Écoute"].tap()
+        XCTAssertTrue(app.buttons["listen_ai"].exists)
+        app.buttons["Scores"].tap()
+        XCTAssertTrue(app.staticTexts["Score NCLC & Points CRS"].exists)
+        XCTAssertEqual(app.sliders.count, 4)
+        app.buttons["Examen"].tap()
+        XCTAssertTrue(app.buttons["prepare-generated-exam"].exists)
+        app.buttons["Pratique"].tap()
+        XCTAssertTrue(app.buttons["listen_ai"].exists)
     }
 }

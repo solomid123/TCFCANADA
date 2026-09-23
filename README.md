@@ -20,9 +20,11 @@ Run `bash scripts/build-ipa.sh` with Xcode selected. The script checks that the 
 
 ## App structure
 
-- **Banque d'écoute**: the generated 39-question listening flow opens directly from the home page.
+- **Pratique**: the Lecture / Écoute / Écriture / Parole skill menus. Écoute contains the generated 39-question listening flow; the other skill banks have availability screens until their generators are connected.
 - **Mes tests**: prepared tests, saved progress, scores and complete corrections.
-- The former bundled reading/listening/writing/speaking samples, reference tools, mock exam and scores tab have been removed. Downloaded generated tests remain cached for reuse.
+- **Examen**: entry point to the available generated listening test.
+- **Scores**: the NCLC/CRS calculator.
+- Bundled sample exercises and media have been removed. Downloaded generated tests remain cached for reuse.
 
 Spoken-choice recordings announce “Proposition A”, pause 700 ms before the choice, and leave 1.5 seconds before the next proposition. Recordings include a short lead-in. Saved test manifests are refreshed on opening so corrected audio replaces older cached versions while preserving answers.
 
@@ -30,7 +32,7 @@ Spoken-choice recordings announce “Proposition A”, pause 700 ms before the c
 
 `apptsst/TCFGlassTheme.swift` defines the shared palette, layered background, cards, buttons, and level labels. It uses native Liquid Glass on iOS 26+, a material fallback on iOS 17–25, and opaque surfaces when Reduce Transparency is enabled.
 
-`ContentView.swift` hosts the generated-only bank. `PreparationView.swift` routes new and saved tests; `AIListeningSessionView.swift` presents the listening session and its review.
+`ContentView.swift` hosts the floating Pratique / Examen / Scores navigation. `PreparationView.swift` owns the four skill menus and routes new and saved tests; `AIListeningSessionView.swift` presents listening sessions and reviews.
 
 ## Build and test
 
@@ -44,4 +46,4 @@ xcodebuild -project apptsst.xcodeproj -scheme apptsst \
   test
 ```
 
-The UI checks cover answer retention/results, corrected-audio cache refresh, saved-test reopening, automatic hosted connection, and the generated-only navigation. Fixture-server UI tests run in Debug; hosted checks can also run in Release.
+The UI checks cover answer retention/results, corrected-audio cache refresh, saved-test reopening, automatic hosted connection, and navigation-menu preservation without bundled sample exercises. Fixture-server UI tests run in Debug; hosted checks can also run in Release.
